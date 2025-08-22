@@ -21,21 +21,30 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # OpenAI
-    openai_api_key: str = Field(..., env="OPENAI_API_KEY")
+    openai_api_key: str | None = Field(None, env="OPENAI_API_KEY")
     openai_model: str = Field("o3-mini", env="OPENAI_MODEL")
     max_completion_tokens: int = Field(4096, env="MAX_COMPLETION_TOKENS")
     llm_backend: str = Field("openai", env="LLM_BACKEND")
+    # HuggingFace
+    hf_access_token: str | None = Field(None, env="HF_ACCESS_TOKEN")
+    # Data source
+    data_source_type: str = Field("huggingface", env="DATA_SOURCE_TYPE") # "huggingface" or "local"
+    local_data_path: str | None = Field(None, env="LOCAL_DATA_PATH")
     # Local backend options
     local_model_name: str | None = Field(None, env="LOCAL_MODEL_NAME")
     local_model_path: str | None = Field(None, env="LOCAL_MODEL_PATH")
     local_server_url: str | None = Field(None, env="LOCAL_SERVER_URL")
 
     # Storage
-    sqlite_db: str = Field("~/.alphaevolve/programs.db", env="SQLITE_DB")
+    sqlite_db: str = Field("experiments/programs.db", env="SQLITE_DB")
     prompt_population_size: int = Field(50, env="PROMPT_POPULATION_SIZE")
     prompt_mutation_rate: float = Field(0.3, env="PROMPT_MUTATION_RATE")
     prompt_iterations: int = Field(5, env="PROMPT_ITERATIONS")
     prompt_sqlite_db: str = Field("~/.alphaevolve/prompts.db", env="PROMPT_SQLITE_DB")
+
+    # Backtesting
+    default_symbols: str = Field("SPY,EFA,IEF,VNQ,GSG", env="DEFAULT_SYMBOLS")
+    start_date: str = Field("1990-01-01", env="START_DATE")
 
     # ------------------------------------------------------------------
     # Evolutionary parameters

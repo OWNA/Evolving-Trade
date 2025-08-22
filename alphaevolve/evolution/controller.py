@@ -21,11 +21,9 @@ from alphaevolve.config import settings
 from alphaevolve.evaluator.backtest import evaluate
 from alphaevolve.evolution.patching import apply_patch
 from alphaevolve.evolution.prompt_ga import PromptGenome
-from alphaevolve.llm_engine import client as llm_client
+from alphaevolve.llm_engine import _load_client
 from alphaevolve.llm_engine import prompts
 from alphaevolve.store.sqlite import ProgramStore
-from alphaevolve.strategies.base import BaseLoggingStrategy
-from examples import config as example_config
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +37,15 @@ class Controller:
         metric: str | None = None,
         max_concurrency: int = 4,
         prompt: PromptGenome | None = None,
+        api_key: str | None = None,
     ):
         self.store = store
         self.sem = asyncio.Semaphore(max_concurrency)
         self.initial_program_paths = [Path(p) for p in initial_program_paths or []]
         self.prompt = prompt or PromptGenome(prompts.SYSTEM_MSG, prompts.USER_TEMPLATE)
-        self.metric = metric or example_config.HOF_METRIC
+        self.metric = metric or "calmar"
         self._ensure_seed_population()
+        self.llm_client = _load_client(api_key=api_key)
 
     # ------------------------------------------------------------------
     # internal helpers
@@ -55,26 +55,21 @@ class Controller:
         if self.store._count() > 0:
             return  # already seeded
 
-        paths = self.initial_program_paths
-        if not paths:
-            paths = [
-                Path("examples/sma_momentum.py"),
-                Path("examples/vol_adj_momentum.py"),
-            ]
-
-        for i, path in enumerate(paths):
-            try:
-                code = Path(path).read_text()
-            except Exception as e:
-                logger.error(f"Failed to read seed program {path}: {e}")
-                continue
-            self.store.insert(
-                textwrap.dedent(code),
-                metrics=None,
-                parent_id=None,
-                island=i % settings.num_islands,
-            )
-        logger.info("Seed strategies inserted into store.")
+        # Use the HFT imbalance strategy as the initial seed
+        seed_path = Path(__file__).resolve().parent.parent.parent / "examples" / "hft_imbalance.py"
+        try:
+            code = seed_path.read_text()
+        except Exception as e:
+            logger.error(f"Failed to read seed program {seed_path}: {e}")
+            return
+            
+        self.store.insert(
+            textwrap.dedent(code),
+            metrics=None,
+            parent_id=None,
+            island=0,
+        )
+        logger.info("Seed HFT strategy inserted into store.")
 
     def _select_parent(self, parent_id: str | None):
         if parent_id:
@@ -106,35 +101,21 @@ class Controller:
             # 2) Build prompt & call OpenAI
             messages = prompts.build(parent, self.store, metric=self.metric, prompt=prompt)
             try:
-                msg = await llm_client.chat(messages)
+                msg = await self.llm_client.chat(messages)
+                child_code = msg.content
             except Exception as e:
-                logger.error(f"OpenAI call failed: {e}")
+                logger.error(f"LLM call failed: {e}")
                 return
 
-            # 3) Apply patch
+            # 3) Evaluate
             try:
-                diff_json = json.loads(msg.content)
-            except json.JSONDecodeError as e:
-                logger.error(f"Model did not return valid JSON: {e}\n{msg.content[:500]}")
-                return
-
-            child_strategy = apply_patch(parent["code"], diff_json)
-
-            if "class BaseLoggingStrategy" not in child_strategy:
-                imports = "from collections import deque\nimport backtrader as bt"
-                base_cls = inspect.getsource(BaseLoggingStrategy)
-                child_code = textwrap.dedent(imports + "\n\n" + base_cls + "\n\n" + child_strategy)
-            else:
-                child_code = textwrap.dedent(child_strategy)
-
-            # 4) Evaluate
-            try:
+                # The LLM's response is the full code, no patching needed
                 kpis = await evaluate(child_code)
             except Exception as e:
                 logger.error(f"Evaluation failed: {e}")
                 return
 
-            # 5) Persist
+            # 4) Persist
             self.store.insert(
                 child_code,
                 kpis,

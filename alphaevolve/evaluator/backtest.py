@@ -1,32 +1,28 @@
 """
-Synchronous + async helpers to evaluate a *code string* defining a Backtrader
-strategy.  The entry symbol must expose either:
-
-    1. a subclass of `bt.Strategy` named `Strategy`, **or**
-    2. a variable `STRATEGY_CLASS` pointing to a bt.Strategy subclass.
-
-Returned KPI dict is JSON-serialisable for Mongo storage.
+Evaluation engine for high-frequency, event-driven strategies.
 """
-
-import asyncio, inspect, importlib.util, sys, tempfile, types
+import asyncio
+import importlib.util
+import sys
+import tempfile
+import types
 from functools import partial
 from pathlib import Path
-from typing import Any, Sequence, Dict
-import backtrader as bt
-import pandas as pd
+from typing import Any, Dict
+import logging
 
-from examples import config as example_config
-from alphaevolve.evaluator.loader import load_ohlc, add_feeds_to_cerebro
+import pandas as pd
+import numpy as np
+
+from alphaevolve.config import settings
+from alphaevolve.evaluator.hft_backtester import HFTBacktester
+from alphaevolve.strategies.hft_base import HFTStrategy
 from alphaevolve.evaluator import metrics as mt
 
-
-# ------------------------------------------------------------------ #
-# INTERNAL HELPERS
-# ------------------------------------------------------------------ #
 def _load_module_from_code(code: str, name: str | None = None) -> types.ModuleType:
-    """Create a temporary module from source code string."""
+    """Create a temporary module from a source code string."""
     name = name or f"strategy_{hash(code)}"
-    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as tmp:
+    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding='utf-8') as tmp:
         tmp.write(code)
         tmp_path = Path(tmp.name)
 
@@ -37,72 +33,39 @@ def _load_module_from_code(code: str, name: str | None = None) -> types.ModuleTy
     tmp_path.unlink(missing_ok=True)
     return mod
 
+def _find_strategy_class(mod: types.ModuleType) -> type[HFTStrategy]:
+    """Finds the HFTStrategy subclass in a module."""
+    for name, obj in mod.__dict__.items():
+        if isinstance(obj, type) and issubclass(obj, HFTStrategy) and obj is not HFTStrategy:
+            return obj
+    raise ValueError("No HFTStrategy subclass found in the provided code.")
 
-def _find_strategy(mod: types.ModuleType) -> type[bt.Strategy]:
-    for attr in ("Strategy", "STRATEGY_CLASS"):
-        if hasattr(mod, attr):
-            cls = getattr(mod, attr)
-            if inspect.isclass(cls) and issubclass(cls, bt.Strategy):
-                return cls
-    # fallback: first subclass of bt.Strategy in module
-    for v in mod.__dict__.values():
-        if (
-            inspect.isclass(v)
-            and issubclass(v, bt.Strategy)
-            and not v.__name__ == "BaseLoggingStrategy"
-        ):
-            return v
-    raise ValueError("No compatible Strategy class found in code snippet.")
-
-
-def _run_backtest(
-    strategy_cls: type[bt.Strategy], symbols: Sequence[str] = example_config.DEFAULT_SYMBOLS
-) -> Dict[str, Any]:
-    df = load_ohlc(tuple(symbols), start=example_config.START_DATE)
-    cerebro = bt.Cerebro()
-    add_feeds_to_cerebro(df, cerebro)
-    cerebro.addstrategy(strategy_cls)
-    cerebro.broker.set_cash(100_000)
-
-    # execute
-    strat = cerebro.run(maxcpus=1)[0]  # serial for determinism
-
-    # metrics
-    curve = pd.Series(
-        [pt["value"] for pt in strat.equity_curve],
-        index=[pt["date"] for pt in strat.equity_curve],
-        name="equity",
-    )
-    rets = mt.daily_returns(curve)
-    kpis = {
-        "total_return": curve.iloc[-1] / curve.iloc[0] - 1,
-        "cagr": mt.cagr(curve),
-        "sharpe": mt.sharpe(rets),
-        "max_drawdown": float(mt.max_drawdown(curve)),
-        "calmar": mt.calmar(mt.cagr(curve), mt.max_drawdown(curve)),
-        "n_days": int(curve.size),
-    }
+def _run_hft_backtest(strategy_class: type[HFTStrategy]) -> Dict[str, Any]:
+    """Runs a single HFT backtest and returns performance KPIs."""
+    if not settings.local_data_path:
+        raise ValueError("local_data_path must be set for HFT backtesting.")
+    
+    data = pd.read_parquet(settings.local_data_path)
+    # This is the definitive fix: ensure the DataFrame has a DatetimeIndex.
+    if 'timestamp' in data.columns:
+        data['timestamp'] = pd.to_datetime(data['timestamp'])
+        data.set_index('timestamp', inplace=True)
+    
+    strategy_instance = strategy_class()
+    backtester = HFTBacktester(data, strategy_instance)
+    
+    backtester.run()
+    
+    kpis = mt.calculate_metrics_from_trades(backtester.trades, backtester.initial_cash)
     return kpis
 
-
-# ------------------------------------------------------------------ #
-# PUBLIC API
-# ------------------------------------------------------------------ #
-def evaluate_sync(
-    code: str, *, symbols: Sequence[str] = example_config.DEFAULT_SYMBOLS
-) -> Dict[str, Any]:
-    """Blocking evaluation; raises on errors (handled by controller)."""
+def evaluate_sync(code: str) -> Dict[str, Any]:
+    """Blocking evaluation for a single HFT strategy."""
     mod = _load_module_from_code(code)
-    strat_cls = _find_strategy(mod)
-    return _run_backtest(strat_cls, symbols=symbols)
+    strategy_class = _find_strategy_class(mod)
+    return _run_hft_backtest(strategy_class)
 
-
-async def evaluate(
-    code: str, *, symbols: Sequence[str] = example_config.DEFAULT_SYMBOLS
-) -> Dict[str, Any]:
-    """
-    Async wrapper so the evolution controller can `await`.
-    Runs the sync back-test in a thread to avoid event-loop blocking.
-    """
+async def evaluate(code: str) -> Dict[str, Any]:
+    """Async wrapper for the HFT evaluation."""
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, partial(evaluate_sync, code, symbols=symbols))
+    return await loop.run_in_executor(None, partial(evaluate_sync, code))

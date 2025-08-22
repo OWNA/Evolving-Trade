@@ -10,7 +10,6 @@ from typing import Any
 from alphaevolve.evolution.controller import Controller
 from alphaevolve.store.sqlite import ProgramStore
 from alphaevolve.config import settings
-from examples import config as example_settings
 
 __all__ = ["AlphaEvolve", "Strategy"]
 
@@ -33,6 +32,7 @@ class AlphaEvolve:
         *,
         store: ProgramStore | None = None,
         experiment_name: str | None = None,
+        api_key: str | None = None,
     ) -> None:
         self.initial_program_paths = [Path(p) for p in initial_program_paths]
         if store is not None:
@@ -44,16 +44,14 @@ class AlphaEvolve:
                 self.store = ProgramStore(db_path=db_path)
             else:
                 self.store = ProgramStore()
-        metrics = (
-            example_settings.BRANCH_METRICS if example_settings.MULTI_BRANCH_MUTATION else [None]
-        )
+
         self.controllers = [
             Controller(
                 self.store,
                 initial_program_paths=self.initial_program_paths,
-                metric=m,
+                metric=None,
+                api_key=api_key,
             )
-            for m in metrics
         ]
 
     async def run(self, iterations: int = 1) -> Strategy:

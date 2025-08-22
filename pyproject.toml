@@ -37,6 +37,7 @@ dependencies = [
   "numpy",
   "tqdm",
   "pydantic>=2.0",
+  "pydantic-settings",
   "pyyaml>=6.0",
 ]
 
