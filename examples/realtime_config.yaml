@@ -1,0 +1,127 @@
+# Realtime Bybit Trading Configuration
+
+# Market Data Configuration
+market_data:
+  # Main WebSocket endpoint for real market data (mainnet)
+  websocket_url: "wss://stream.bybit.com/v5/public/linear"
+  
+  # Trading symbol
+  symbol: "BTCUSDT"
+  
+  # Orderbook depth (1-1000, recommend 50 for HFT)
+  depth: 50
+  
+  # Connection settings
+  reconnect_delay: 5  # seconds
+  max_reconnect_attempts: 10
+  
+  # Data processing
+  max_orderbook_levels: 50
+  enable_data_logging: false
+
+# Paper Trading Configuration  
+paper_trading:
+  # Demo trading endpoint
+  trading_url: "https://api-demo.bybit.com"
+  
+  # Credentials file path (relative to credentials folder)
+  credentials_file: "bybit_demo.yaml"
+  
+  # Initial balance
+  initial_balance: 100000.0  # USDT
+  
+  # Order execution settings
+  simulate_latency: true
+  latency_ms: 50  # Simulated execution latency
+  
+  # Risk management
+  max_position_size: 1.0  # BTC
+  daily_loss_limit: 1000.0  # USDT
+  max_drawdown_pct: 0.05  # 5%
+
+# Strategy Configuration
+strategy:
+  # Strategy type
+  name: "SimpleSpreadStrategy"
+  
+  # Strategy parameters
+  parameters:
+    spread_threshold: 10.0  # Minimum spread to trade (USDT)
+    position_size: 0.001    # Order size per trade (BTC)
+    min_trade_interval: 5.0 # Minimum seconds between trades
+    
+  # Risk limits
+  risk_limits:
+    max_position_size: 1.0      # Maximum position in BTC
+    min_spread_threshold: 0.5   # Minimum spread to trade (USDT)
+    max_orders_per_minute: 60   # Rate limiting
+    
+  # Evolution integration
+  evolution:
+    enable_evolution: false  # Enable strategy evolution
+    evolution_interval: 3600 # Seconds between evolution cycles
+    population_size: 10      # Number of strategy variants
+    mutation_rate: 0.1       # Strategy mutation rate
+
+# Dashboard Configuration
+dashboard:
+  # Streamlit settings
+  port: 8501
+  title: "Realtime Bybit Trading Dashboard"
+  
+  # Display settings
+  auto_refresh: true
+  refresh_interval: 2  # seconds
+  max_trade_history: 100
+  
+  # Chart settings
+  orderbook_levels: 20  # Levels to display in depth chart
+  enable_charts: true
+  chart_theme: "plotly"
+
+# Logging Configuration
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  log_to_file: false
+  log_file: "logs/realtime_trading.log"
+  
+  # Log rotation
+  max_file_size: "100MB"
+  backup_count: 5
+  
+  # Specific loggers
+  loggers:
+    websocket: "INFO"
+    orderbook: "INFO" 
+    paper_trader: "INFO"
+    strategy: "INFO"
+    dashboard: "WARNING"
+
+# Performance Monitoring
+monitoring:
+  # Metrics collection
+  enable_metrics: true
+  metrics_interval: 60  # seconds
+  
+  # Performance thresholds
+  max_latency_ms: 100    # Alert if processing latency exceeds this
+  min_updates_per_sec: 10 # Alert if update rate drops below this
+  
+  # Alerts
+  enable_alerts: false
+  alert_email: null
+  
+# Development Settings
+development:
+  # Debug options
+  debug_mode: false
+  save_raw_data: false
+  data_replay: false
+  
+  # Testing
+  mock_data: false
+  mock_trader: false
+  
+  # Performance profiling
+  enable_profiling: false
+  profile_output: "logs/profile.log"
