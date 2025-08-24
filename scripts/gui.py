@@ -139,4 +139,3 @@ with col_chart:
         
     except Exception as e:
         st.error(f"Failed to run backtest: {e}")
-
