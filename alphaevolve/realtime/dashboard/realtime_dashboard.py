@@ -561,12 +561,54 @@ def create_dashboard_app():
     # Render sidebar config
     config = dashboard.render_sidebar_config()
     
+    # Create demo instances for standalone dashboard
+    try:
+        # Create demo orderbook with sample data
+        orderbook = RealtimeOrderbook("BTCUSDT", max_depth=50)
+        
+        # Add sample orderbook data
+        sample_data = {
+            "type": "snapshot",
+            "b": [["98750.50", "1.2"], ["98750.00", "0.8"], ["98749.50", "2.1"]],
+            "a": [["98751.00", "0.9"], ["98751.50", "1.5"], ["98752.00", "0.7"]],
+            "u": 12345,
+            "seq": 1,
+            "timestamp": int(time.time() * 1000)
+        }
+        orderbook.process_message(sample_data)
+        
+        # Create demo paper trader
+        paper_trader = PaperTrader("credentials/bybit_demo.yaml")
+        paper_trader.balance = 100000.0
+        paper_trader.set_orderbook(orderbook)
+        
+        # Import strategy classes
+        from alphaevolve.realtime.strategies.realtime_base import SimpleSpreadStrategy
+        
+        # Create demo strategy based on config selection
+        strategy_name = config.get('strategy_name', 'SimpleSpreadStrategy')
+        if strategy_name == 'SimpleSpreadStrategy':
+            strategy = SimpleSpreadStrategy(spread_threshold=5.0, position_size=0.001)
+        else:
+            # Default fallback
+            strategy = SimpleSpreadStrategy(spread_threshold=5.0, position_size=0.001)
+            
+        strategy.set_paper_trader(paper_trader)
+        strategy.set_orderbook(orderbook)
+        strategy.start()
+        
+    except Exception as e:
+        st.error(f"Error initializing demo components: {e}")
+        # Fallback to None values
+        orderbook = None
+        paper_trader = None
+        strategy = None
+    
     # Main dashboard content
-    # Note: In a real implementation, you would connect these to actual instances
     dashboard.render_main_dashboard(
-        orderbook=None,  # Connect to real orderbook
-        paper_trader=None,  # Connect to real paper trader
-        strategy=None  # Connect to real strategy
+        orderbook=orderbook,
+        paper_trader=paper_trader,
+        strategy=strategy
     )
     
     # Auto-refresh
